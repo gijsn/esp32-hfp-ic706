@@ -376,8 +376,12 @@ void app_main(void) {
     esp_hf_client_init();
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
-    audio_board_handle_t board_handle = audio_board_init();
-    audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_DECODE, AUDIO_HAL_CTRL_START);
+    // audio_board_handle_t board_handle = audio_board_init();
+    audio_hal_codec_config_t audio_hal_conf = AUDIO_CODEC_DEFAULT_CONFIG();
+    audio_hal_conf.adc_input = AUDIO_HAL_ADC_INPUT_LINE1;
+    audio_hal_handle_t audio_hal = audio_hal_init(&audio_hal_conf, &AUDIO_CODEC_ES8388_DEFAULT_HANDLE);
+    // audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
+    audio_hal_ctrl_codec(audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
 
     ESP_LOGI(TAG, "[ 3 ] Create audio pipeline for playback");
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
@@ -385,20 +389,20 @@ void app_main(void) {
     pipeline_e = audio_pipeline_init(&pipeline_cfg);
 
     ESP_LOGI(TAG, "[3.1] Create i2s stream to write data to codec chip and read data from codec chip");
+    // this seems to be the output to the speaker
     i2s_stream_cfg_t i2s_cfg1 = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg1.type = AUDIO_STREAM_WRITER;
     i2s_stream_writer = i2s_stream_init(&i2s_cfg1);
 
+    // this seems to be the microphone input
     i2s_stream_cfg_t i2s_cfg2 = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg2.type = AUDIO_STREAM_READER;
-#if defined CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-    i2s_cfg2.chan_cfg.id = I2S_NUM_1;
-#else
-    i2s_cfg2.i2s_port = I2S_NUM_1;
-    i2s_cfg2.i2s_config.use_apll = false;
-#endif /* ESP_IDF_VERSION <= ESP_IDF_VERSION_VAL(5, 0, 0) */
-#endif /* CONFIG_ESP_LYRAT_MINI_V1_1_BOARD */
+    i2s_cfg2.chan_cfg.id = I2S_NUM_0;
+    i2s_cfg2.multi_out_num = 1;
+    i2s_cfg2.std_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_MONO;  // mono (1)
+    i2s_cfg2.std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+    // i2s_cfg2.std_cfg.clk_cfg.sample_rate_hz = 16000;
+    /* CONFIG_ESP_LYRAT_MINI_V1_1_BOARD */
     i2s_stream_reader = i2s_stream_init(&i2s_cfg2);
 
     raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
