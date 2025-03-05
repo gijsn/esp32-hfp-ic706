@@ -453,7 +453,7 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "[ 1 ] Create Bluetooth service");
     bluetooth_service_cfg_t bt_cfg = {
-        .device_name = "ESP-ADF-AUDIO",
+        .device_name = "ESP-IC706MKIIG",
         .mode = BLUETOOTH_A2DP_SINK,
     };
     bluetooth_service_start(&bt_cfg);
