@@ -20,6 +20,7 @@
 #include "esp_hf_client_api.h"
 #include "esp_log.h"
 #include "esp_peripherals.h"
+#include "esp_spp_api.h"
 #include "filter_resample.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -44,10 +45,16 @@
 
 static const char *TAG = "BLUETOOTH_EXAMPLE";
 static const char *BT_HF_TAG = "BT_HF";
+static const char *SPP_TAG = "SPP_ACCEPTOR_DEMO";
+static const char *SPP_SERVER_NAME = "SPP_SERVER";
 
 static audio_element_handle_t raw_read, bt_stream_reader, i2s_stream_writer, i2s_stream_reader;
 static audio_pipeline_handle_t pipeline_d, pipeline_e;
 static bool is_get_hfp = true;
+
+static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
+static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
+static const bool esp_spp_enable_l2cap_ertm = true;
 
 const char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",      /*!< connection state changed event */
@@ -354,6 +361,84 @@ void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *p
     }
 }
 
+static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
+    switch (event) {
+        case ESP_SPP_INIT_EVT:
+            if (param->init.status == ESP_SPP_SUCCESS) {
+                ESP_LOGI(SPP_TAG, "ESP_SPP_INIT_EVT");
+                esp_spp_start_srv(ESP_SPP_SEC_NONE, role_slave, 0, SPP_SERVER_NAME);
+            } else {
+                ESP_LOGE(SPP_TAG, "ESP_SPP_INIT_EVT status:%d", param->init.status);
+            }
+            break;
+        case ESP_SPP_DISCOVERY_COMP_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_DISCOVERY_COMP_EVT");
+            break;
+        case ESP_SPP_OPEN_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_OPEN_EVT");
+            break;
+        case ESP_SPP_CLOSE_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_CLOSE_EVT status:%d handle:%" PRIu32 " close_by_remote:%d", param->close.status,
+                     param->close.handle, param->close.async);
+            break;
+        case ESP_SPP_START_EVT:
+            if (param->start.status == ESP_SPP_SUCCESS) {
+                ESP_LOGI(SPP_TAG, "ESP_SPP_START_EVT handle:%" PRIu32 " sec_id:%d scn:%d", param->start.handle, param->start.sec_id,
+                         param->start.scn);
+                // esp_bt_gap_set_device_name("ESP-ADF-SPP");
+                esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+            } else {
+                ESP_LOGE(SPP_TAG, "ESP_SPP_START_EVT status:%d", param->start.status);
+            }
+            break;
+        case ESP_SPP_CL_INIT_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_CL_INIT_EVT");
+            break;
+        case ESP_SPP_DATA_IND_EVT:
+#if (SPP_SHOW_MODE == SPP_SHOW_DATA)
+
+            //  We only show the data in which the data length is less than 128 here. If you want to print the data and
+            //  the data rate is high, it is strongly recommended to process them in other lower priority application task
+            //  rather than in this callback directly. Since the printing takes too much time, it may stuck the Bluetooth
+            //  stack and also have a effect on the throughput!
+
+            ESP_LOGI(SPP_TAG, "ESP_SPP_DATA_IND_EVT len:%d handle:%" PRIu32,
+                     param->data_ind.len, param->data_ind.handle);
+            if (param->data_ind.len < 128) {
+                ESP_LOG_BUFFER_HEX("", param->data_ind.data, param->data_ind.len);
+            }
+            // give response
+            // esp_spp_write(param->data_ind.handle, param->data_ind.len, param->data_ind.data);
+#else
+            gettimeofday(&time_new, NULL);
+            data_num += param->data_ind.len;
+            if (time_new.tv_sec - time_old.tv_sec >= 3) {
+                print_speed();
+            }
+#endif
+            break;
+        case ESP_SPP_CONG_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_CONG_EVT");
+            break;
+        case ESP_SPP_WRITE_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_WRITE_EVT");
+            break;
+        case ESP_SPP_SRV_OPEN_EVT:
+            // ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_OPEN_EVT status:%d handle:%" PRIu32 ", rem_bda:[%s]", param->srv_open.status,
+            //         param->srv_open.handle, bda2str(param->srv_open.rem_bda, bda_str, sizeof(bda_str)));
+            // gettimeofday(&time_old, NULL);
+            break;
+        case ESP_SPP_SRV_STOP_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_SRV_STOP_EVT");
+            break;
+        case ESP_SPP_UNINIT_EVT:
+            ESP_LOGI(SPP_TAG, "ESP_SPP_UNINIT_EVT");
+            break;
+        default:
+            break;
+    }
+}
+
 void app_main(void) {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
@@ -374,6 +459,22 @@ void app_main(void) {
     bluetooth_service_start(&bt_cfg);
     esp_hf_client_register_callback(bt_hf_client_cb);
     esp_hf_client_init();
+
+    ESP_LOGI(TAG, "[ 1.1 ] Create SPP profile");
+    esp_spp_cfg_t bt_spp_cfg = {
+        .mode = esp_spp_mode,
+        .enable_l2cap_ertm = esp_spp_enable_l2cap_ertm,
+        .tx_buffer_size = 0,  // Only used for ESP_SPP_MODE_VFS mode
+    };
+    if (esp_spp_register_callback(esp_spp_cb) != ESP_OK) {
+        ESP_LOGE(TAG, "spp register failed");
+        return;
+    }
+
+    if (esp_spp_enhanced_init(&bt_spp_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "%s spp init failed", __func__);
+        return;
+    }
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     // audio_board_handle_t board_handle = audio_board_init();
