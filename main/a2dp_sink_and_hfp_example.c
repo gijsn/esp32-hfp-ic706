@@ -15,6 +15,7 @@
 #include "audio_pipeline.h"
 #include "bluetooth_service.h"
 #include "board.h"
+#include "driver/uart.h"
 #include "esp_bt_defs.h"
 #include "esp_gap_bt_api.h"
 #include "esp_hf_client_api.h"
@@ -55,6 +56,10 @@ static bool is_get_hfp = true;
 static const esp_spp_role_t role_slave = ESP_SPP_ROLE_SLAVE;
 static const esp_spp_mode_t esp_spp_mode = ESP_SPP_MODE_CB;
 static const bool esp_spp_enable_l2cap_ertm = true;
+
+const uart_port_t radio_uart_num = UART_NUM_1;
+static const uint16_t BUF_SIZE = 512;
+static uint16_t radio_data_len = 0;
 
 const char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",      /*!< connection state changed event */
@@ -407,8 +412,11 @@ static void esp_spp_cb(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
             if (param->data_ind.len < 128) {
                 ESP_LOG_BUFFER_HEX("", param->data_ind.data, param->data_ind.len);
             }
-            // give response
+            // give echo response
             // esp_spp_write(param->data_ind.handle, param->data_ind.len, param->data_ind.data);
+
+            // send command to CI-V port
+            uart_write_bytes(radio_uart_num, param->data_ind.data, param->data_ind.len);
 #else
             gettimeofday(&time_new, NULL);
             data_num += param->data_ind.len;
@@ -475,6 +483,23 @@ void app_main(void) {
         ESP_LOGE(TAG, "%s spp init failed", __func__);
         return;
     }
+    ESP_LOGI(TAG, "[ 1.2 ] Initiate UART 1");
+
+    uart_config_t uart_config = {
+        .baud_rate = 9600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_CTS_RTS,
+        .rx_flow_ctrl_thresh = BUF_SIZE,
+    };
+    int intr_alloc_flags = 0;
+    uart_driver_install(radio_uart_num, BUF_SIZE, BUF_SIZE, 0, NULL, intr_alloc_flags);
+    uart_param_config(radio_uart_num, &uart_config);
+    uart_set_pin(radio_uart_num, GPIO_NUM_17, GPIO_NUM_16, -1, -1);
+
+    // Configure a temporary buffer for the incoming data
+    uint8_t *radio_data = (uint8_t *)malloc(BUF_SIZE);
 
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     // audio_board_handle_t board_handle = audio_board_init();
@@ -584,7 +609,14 @@ void app_main(void) {
             ESP_LOGE(TAG, "[ * ] Event interface error : %d", ret);
             continue;
         }
+        int len = uart_read_bytes(radio_uart_num, radio_data, (BUF_SIZE - 1), 20 / portTICK_PERIOD_MS);
 
+        if (len > 0) {
+            // send data over SPP
+            // esp_spp_write(param->data_ind.handle, param->data_ind.len, param->data_ind.data);
+            ESP_LOGI(TAG, "send this to SPP:");
+            ESP_LOG_BUFFER_HEX_LEVEL(TAG, radio_data, radio_data_len, ESP_LOG_INFO);
+        }
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *)bt_stream_reader && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
             audio_element_info_t music_info = {0};
             audio_element_getinfo(bt_stream_reader, &music_info);
@@ -624,16 +656,16 @@ void app_main(void) {
         if (msg.source_type == PERIPH_ID_BLUETOOTH && msg.source == (void *)bt_periph) {
             if (msg.cmd == PERIPH_BLUETOOTH_DISCONNECTED) {
                 ESP_LOGW(TAG, "[ * ] Bluetooth disconnected");
-                break;
+                continue;
             }
         }
         /* Stop when the last pipeline element (i2s_stream_writer in this case) receives stop event */
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *)i2s_stream_writer && msg.cmd == AEL_MSG_CMD_REPORT_STATUS && (int)msg.data == AEL_STATUS_STATE_STOPPED) {
             ESP_LOGW(TAG, "[ * ] Stop event received");
-            break;
+            continue;
         }
     }
-
+    // TODO: make sure we do not get here
     ESP_LOGI(TAG, "[ 8 ] Stop audio_pipeline");
     audio_pipeline_stop(pipeline_d);
     audio_pipeline_wait_for_stop(pipeline_d);
