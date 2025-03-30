@@ -504,10 +504,11 @@ void app_main(void) {
     ESP_LOGI(TAG, "[ 2 ] Start codec chip");
     // audio_board_handle_t board_handle = audio_board_init();
     audio_hal_codec_config_t audio_hal_conf = AUDIO_CODEC_DEFAULT_CONFIG();
-    audio_hal_conf.adc_input = AUDIO_HAL_ADC_INPUT_LINE1;
+    audio_hal_conf.adc_input = AUDIO_HAL_ADC_INPUT_LINE2;  // LINE1 is mic, LINE2 is jack
     audio_hal_handle_t audio_hal = audio_hal_init(&audio_hal_conf, &AUDIO_CODEC_ES8388_DEFAULT_HANDLE);
     // audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
     audio_hal_ctrl_codec(audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
+    audio_hal_set_volume(audio_hal, 100);
 
     ESP_LOGI(TAG, "[ 3 ] Create audio pipeline for playback");
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
@@ -579,7 +580,7 @@ void app_main(void) {
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
     ESP_LOGI(TAG, "[4.1] Initialize Touch peripheral");
-    audio_board_key_init(set);
+    // audio_board_key_init(set);
 
     ESP_LOGI(TAG, "[4.2] Create Bluetooth peripheral");
     esp_periph_handle_t bt_periph = bluetooth_service_create_periph();
@@ -636,21 +637,21 @@ void app_main(void) {
 
             continue;
         }
-        if ((msg.source_type == PERIPH_ID_TOUCH || msg.source_type == PERIPH_ID_BUTTON || msg.source_type == PERIPH_ID_ADC_BTN) && (msg.cmd == PERIPH_TOUCH_TAP || msg.cmd == PERIPH_BUTTON_PRESSED || msg.cmd == PERIPH_ADC_BUTTON_PRESSED)) {
-            if ((int)msg.data == get_input_play_id()) {
-                ESP_LOGI(TAG, "[ * ] [Play] touch tap event");
-                periph_bluetooth_play(bt_periph);
-            } else if ((int)msg.data == get_input_set_id()) {
-                ESP_LOGI(TAG, "[ * ] [Set] touch tap event");
-                periph_bluetooth_pause(bt_periph);
-            } else if ((int)msg.data == get_input_volup_id()) {
-                ESP_LOGI(TAG, "[ * ] [Vol+] touch tap event");
-                periph_bluetooth_next(bt_periph);
-            } else if ((int)msg.data == get_input_voldown_id()) {
-                ESP_LOGI(TAG, "[ * ] [Vol-] touch tap event");
-                periph_bluetooth_prev(bt_periph);
-            }
-        }
+        // if ((msg.source_type == PERIPH_ID_TOUCH || msg.source_type == PERIPH_ID_BUTTON || msg.source_type == PERIPH_ID_ADC_BTN) && (msg.cmd == PERIPH_TOUCH_TAP || msg.cmd == PERIPH_BUTTON_PRESSED || msg.cmd == PERIPH_ADC_BUTTON_PRESSED)) {
+        //     if ((int)msg.data == get_input_play_id()) {
+        //         ESP_LOGI(TAG, "[ * ] [Play] touch tap event");
+        //         periph_bluetooth_play(bt_periph);
+        //     } else if ((int)msg.data == get_input_set_id()) {
+        //         ESP_LOGI(TAG, "[ * ] [Set] touch tap event");
+        //         periph_bluetooth_pause(bt_periph);
+        //     } else if ((int)msg.data == get_input_volup_id()) {
+        //         ESP_LOGI(TAG, "[ * ] [Vol+] touch tap event");
+        //         periph_bluetooth_next(bt_periph);
+        //     } else if ((int)msg.data == get_input_voldown_id()) {
+        //         ESP_LOGI(TAG, "[ * ] [Vol-] touch tap event");
+        //         periph_bluetooth_prev(bt_periph);
+        //     }
+        // }
 
         /* Stop when the Bluetooth is disconnected or suspended */
         if (msg.source_type == PERIPH_ID_BLUETOOTH && msg.source == (void *)bt_periph) {
